@@ -1,13 +1,28 @@
-import { Title, Button, Container } from '@mantine/core'
+import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
+import { Container, Title, Button } from '@mantine/core'
+import { Dashboard } from './pages/Dashboard'
 
-function App() {
+function Home() {
   return (
     <Container size="sm" py="xl">
       <Title order={1} mb="md">
         Hard Scope Challenge
       </Title>
-      <Button>Get started</Button>
+      <Button component={Link} to="/dashboard">
+        Open dashboard
+      </Button>
     </Container>
+  )
+}
+
+function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/dashboard" element={<Dashboard />} />
+      </Routes>
+    </BrowserRouter>
   )
 }
 

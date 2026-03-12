@@ -1,97 +1,110 @@
 import { Router, Request, Response } from "express";
 
-//Queries
-import { getYouTubeData, getTikTokData } from "../queries/platforms.js";
-
-//Constants
-import { creatorData } from "../constants/creatorData.js";
+//Utils
+import supabase from "../utils/supabase.js";
+import { parsePlatformQuery } from "../utils/query.js";
 
 const router = Router();
 
-const SOCIAVAULT_API_KEY = process.env.SOCIAVAULT_API_KEY;
+function parseDateParam(value: unknown): string | null {
+  if (value == null || typeof value !== "string" || value.trim() === "")
+    return null;
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? null : value.trim();
+}
 
-const SUPPORTED_PLATFORMS = ["youtube", "tiktok"] as const;
-const TOP_PERFORMERS_LIMIT = 10;
+function toStartOfDayUTC(dateStr: string): string {
+  const d = new Date(dateStr);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}T00:00:00.000Z`;
+}
 
-function parsePlatformQuery(platform: unknown): string[] {
-  if (platform === undefined || platform === null) {
-    return ["youtube"];
-  }
-  const arr = Array.isArray(platform) ? platform : [platform];
-  return arr.flatMap((p) =>
-    typeof p === "string"
-      ? p.split(",").map((s) => s.trim().toLowerCase())
-      : [],
-  );
+function toEndOfDayUTC(dateStr: string): string {
+  const d = new Date(dateStr);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}T23:59:59.999Z`;
+}
+
+function parseCreatorIds(value: unknown): number[] | null {
+  if (value == null || typeof value !== "string" || value.trim() === "")
+    return null;
+  const ids = value
+    .split(",")
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => !Number.isNaN(n));
+  return ids.length > 0 ? ids : null;
 }
 
 router.get("/analytics", async (req: Request, res: Response) => {
-  if (!SOCIAVAULT_API_KEY) {
+  const rawStart = parseDateParam(req.query.startDate);
+  const rawEnd = parseDateParam(req.query.endDate);
+  const p_start_date = rawStart ? toStartOfDayUTC(rawStart) : null;
+  const p_end_date = rawEnd ? toEndOfDayUTC(rawEnd) : null;
+  const p_creator_ids = parseCreatorIds(req.query.creatorIds);
+  const p_platforms = parsePlatformQuery(req.query.platforms);
+
+  const rpcParams = { p_start_date, p_end_date, p_creator_ids, p_platforms };
+
+  const [summaryRes, platformRes, creatorRes, topVideosRes] = await Promise.all(
+    [
+      supabase.rpc("get_video_analytics_summary", rpcParams),
+      supabase.rpc("get_video_analytics_by_platform", rpcParams),
+      supabase.rpc("get_analytics_by_creator", rpcParams),
+      supabase.rpc("get_top_videos", rpcParams),
+    ],
+  );
+
+  const summary = summaryRes.data?.[0];
+  const byPlatform = platformRes.data ?? [];
+  const byCreator = creatorRes.data ?? [];
+  const topVideos = topVideosRes.data ?? [];
+
+  if (summaryRes.error) {
+    console.error("get_video_analytics:", summaryRes.error);
+
     return res.status(500).json({
-      error: "Server misconfiguration",
-      message: "SOCIAVAULT_API_KEY is not set",
+      error: "Failed to load analytics summary",
+      message: summaryRes.error.message,
     });
   }
 
-  const platforms = parsePlatformQuery(req.query.platforms);
+  if (platformRes.error) {
+    console.error("get_video_analytics_by_platform:", platformRes.error);
 
-  console.log("platforms", platforms);
-
-  let creatorAnalytics: any = {};
-
-  for (const creator of creatorData) {
-    console.log("creator", creator);
-
-    let analytics: any = {
-      id: creator.id,
-      name: creator.name,
-      youtubeFollowers: 0,
-      youtubeViews: 0,
-      tikTokFollowers: 0,
-      tikTokViews: 0,
-    };
-
-    for (const platform of platforms) {
-      if (platform === "youtube") {
-        const youtubeData = await getYouTubeData(
-          SOCIAVAULT_API_KEY,
-          creator.youtubeChannelId,
-        );
-
-        analytics.youtubeFollowers = youtubeData.subscriberCount;
-        analytics.youtubeViews = youtubeData.viewCount;
-      }
-
-      if (platform === "tiktok") {
-        const tikTokData = await getTikTokData(
-          SOCIAVAULT_API_KEY,
-          creator.tiktokHandle,
-        );
-
-        analytics.tikTokFollowers = tikTokData.subscriberCount;
-        analytics.tikTokViews = tikTokData.viewCount;
-      }
-    }
-
-    console.log("analytics", analytics);
-
-    creatorAnalytics[creator.id] = analytics;
-  }
-
-  let creatorTotals = [];
-
-  for (const analytics of Object.values(creatorAnalytics)) {
-    console.log("analytics", analytics);
-
-    creatorTotals.push({
-      id: analytics.id,
-      name: analytics.name,
-      followers: analytics.youtubeFollowers + analytics.tikTokFollowers,
-      engagement: analytics.youtubeViews + analytics.tikTokViews,
+    return res.status(500).json({
+      error: "Failed to load analytics by platform",
+      message: platformRes.error.message,
     });
   }
 
-  res.json({ creatorTotals });
+  if (creatorRes.error) {
+    console.error("get_analytics_by_creator:", creatorRes.error);
+
+    return res.status(500).json({
+      error: "Failed to load analytics by creator",
+      message: creatorRes.error.message,
+    });
+  }
+
+  if (topVideosRes.error) {
+    console.error("get_top_videos:", topVideosRes.error);
+
+    return res.status(500).json({
+      error: "Failed to load top videos",
+      message: topVideosRes.error.message,
+    });
+  }
+
+  res.json({
+    summary: summary,
+    byPlatform: byPlatform,
+    byCreator: byCreator,
+    topVideos: topVideos,
+  });
 });
 
 export default router;

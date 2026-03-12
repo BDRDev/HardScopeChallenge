@@ -27,8 +27,8 @@ Once the `.env` file is created run the following commands to start up the backe
 
 ```bash
 cd backend
-yarn install
-yarn dev
+npm install
+npm dev
 ```
 
 Backend runs at **http://localhost:3000**.
@@ -45,13 +45,13 @@ Once the `.env.local` file is created run the following commands to start up the
 
 ```bash
 cd frontend
-yarn install
-yarn dev
+npm install
+npm dev
 ```
 
 Frontend runs at **http://localhost:5173**.
 
-(Make sure to run `yarn install` in `frontend` and `backend` at least once before using these.)
+(Make sure to run `npm install` in `frontend` and `backend` at least once before using these.)
 
 ## Data source
 
